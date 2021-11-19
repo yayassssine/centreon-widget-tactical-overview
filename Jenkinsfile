@@ -1,60 +1,24 @@
 /*
 ** Variables.
 */
+properties([buildDiscarder(logRotator(numToKeepStr: '50'))])
 def serie = '20.10'
-def stableBranch = "${serie}.x"
-def devBranch = "dev-${serie}.x"
-env.REF_BRANCH = stableBranch
-
+def maintenanceBranch = "${serie}.x"
 if (env.BRANCH_NAME.startsWith('release-')) {
   env.BUILD = 'RELEASE'
-} else if (env.BRANCH_NAME == stableBranch) {
+} else if ((env.BRANCH_NAME == 'master') || (env.BRANCH_NAME == maintenanceBranch)) {
   env.BUILD = 'REFERENCE'
-} else if (env.BRANCH_NAME == devBranch) {
-  env.BUILD = 'QA'
 } else {
   env.BUILD = 'CI'
 }
-
-def buildBranch = env.BRANCH_NAME
-if (env.CHANGE_BRANCH) {
-  buildBranch = env.CHANGE_BRANCH
-}
-
-/*
-** Functions
-*/
-def isStableBuild() {
-  return ((env.BUILD == 'REFERENCE') || (env.BUILD == 'QA'))
-}
-
-def checkoutCentreonBuild(buildBranch) {
-  def getCentreonBuildGitConfiguration = { branchName -> [
-    $class: 'GitSCM',
-    branches: [[name: "refs/heads/${branchName}"]],
-    doGenerateSubmoduleConfigurations: false,
-    userRemoteConfigs: [[
-      $class: 'UserRemoteConfig',
-      url: "ssh://git@github.com/centreon/centreon-build.git"
-    ]]
-  ]}
-
-  dir('centreon-build') {
-    try {
-      checkout(getCentreonBuildGitConfiguration(buildBranch))
-    } catch(e) {
-      echo "branch '${buildBranch}' does not exist in centreon-build, then fallback to master"
-      checkout(getCentreonBuildGitConfiguration('master'))
-    }
-  }
-}
+def featureFiles = []
 
 /*
 ** Pipeline code.
 */
-stage('Deliver sources') {
+stage('Source') {
   node {
-    checkoutCentreonBuild(buildBranch)
+    sh 'setup_centreon_build.sh'
     env.WIDGET = 'tactical-overview'
     dir("centreon-widget-${env.WIDGET}") {
       checkout scm
@@ -77,80 +41,28 @@ stage('Deliver sources') {
 }
 
 try {
-  stage('Unit tests // RPMs packaging // Sonar analysis') {
-    parallel 'unit tests backend centos7': {
+  stage('Package') {
+    parallel 'centos7': {
       node {
-        checkoutCentreonBuild(buildBranch)
-        sh "./centreon-build/jobs/widgets/${serie}/widget-unittest.sh centos7"
-        if (currentBuild.result == 'UNSTABLE')
-          currentBuild.result = 'FAILURE'
-
-        if (env.CHANGE_ID) { // pull request to comment with coding style issues
-          ViolationsToGitHub([
-            repositoryName: 'centreon-widget-tactical-overview',
-            pullRequestId: env.CHANGE_ID,
-
-            createSingleFileComments: true,
-            commentOnlyChangedContent: true,
-            commentOnlyChangedFiles: true,
-            keepOldComments: false,
-
-            commentTemplate: "**{{violation.severity}}**: {{violation.message}}",
-
-            violationConfigs: [
-              [parser: 'CHECKSTYLE', pattern: '.*/codestyle-be.xml$', reporter: 'Checkstyle']
-            ]
-          ])
-        }
-
-        discoverGitReferenceBuild()
-        recordIssues(
-          enabledForFailure: true,
-          failOnError: true,
-          qualityGates: [[threshold: 1, type: 'DELTA', unstable: false]],
-          tool: phpCodeSniffer(id: 'phpcs', name: 'phpcs', pattern: 'codestyle-be.xml'),
-          trendChartType: 'NONE'
-        )
-
-        // Run sonarQube analysis
-        withSonarQubeEnv('SonarQubeDev') {
-          sh "./centreon-build/jobs/widgets/${serie}/widget-analysis.sh"
-        }
-        def qualityGate = waitForQualityGate()
-        if (qualityGate.status != 'OK') {
-          currentBuild.result = 'FAIL'
-        }
-      }
-    },
-    'RPM packaging centos7': {
-      node {
-        checkoutCentreonBuild(buildBranch)
+        sh 'setup_centreon_build.sh'
         sh "./centreon-build/jobs/widgets/${serie}/widget-package.sh centos7"
-        archiveArtifacts artifacts: 'rpms-centos7.tar.gz'
-        stash name: "rpms-centos7", includes: 'output/noarch/*.rpm'
-        sh 'rm -rf output'
       }
     },
-    'RPM packaging centos8': {
+    'centos8': {
       node {
-        checkoutCentreonBuild(buildBranch)
+        sh 'setup_centreon_build.sh'
         sh "./centreon-build/jobs/widgets/${serie}/widget-package.sh centos8"
-        archiveArtifacts artifacts: 'rpms-centos8.tar.gz'
-        stash name: "rpms-centos8", includes: 'output/noarch/*.rpm'
-        sh 'rm -rf output'      
       }
     }
     if ((currentBuild.result ?: 'SUCCESS') != 'SUCCESS') {
-      error('Unit tests stage failure.');
+      error('Package stage failure.');
     }
   }
 
-  if ((env.BUILD == 'RELEASE') || (env.BUILD == 'QA') || (env.BUILD == 'CI')) {
+  if ((env.BUILD == 'RELEASE') || (env.BUILD == 'REFERENCE')) {
     stage('Delivery') {
       node {
-        checkoutCentreonBuild(buildBranch)
-        unstash 'rpms-centos8'
-        unstash 'rpms-centos7'
+        sh 'setup_centreon_build.sh'
         sh "./centreon-build/jobs/widgets/${serie}/widget-delivery.sh"
       }
       if ((currentBuild.result ?: 'SUCCESS') != 'SUCCESS') {
