@@ -107,13 +107,13 @@ try {
         sh 'setup_centreon_build.sh'
         sh "./centreon-build/jobs/widgets/${serie}/widget-package.sh centos7"
       }
-    },
-    'centos8': {
-      node {
-        sh 'setup_centreon_build.sh'
-        sh "./centreon-build/jobs/widgets/${serie}/widget-package.sh centos8"
-      }
     }
+    //'centos8': {
+    //  node {
+    //    sh 'setup_centreon_build.sh'
+    //    sh "./centreon-build/jobs/widgets/${serie}/widget-package.sh centos8"
+    //  }
+    //}
     if ((currentBuild.result ?: 'SUCCESS') != 'SUCCESS') {
       error('Package stage failure.');
     }
