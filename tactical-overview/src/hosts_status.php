@@ -248,7 +248,11 @@ $numLine = 1;
 $autoRefresh = (isset($preferences['refresh_interval']) && (int)$preferences['refresh_interval'] > 0)
     ? (int)$preferences['refresh_interval']
     : 30;
-
+$variablesThemeCSS = match ($centreon->user->theme) {
+    'light' => "Generic-theme",
+    'dark' => "Centreon-Dark",
+    default => throw new \Exception('Unknown user theme : ' . $centreon->user->theme),
+};
 $template->assign('preferences', $preferences);
 $template->assign('widgetId', $widgetId);
 $template->assign('autoRefresh', $autoRefresh);
@@ -256,4 +260,6 @@ $template->assign('dataPEND', $dataPEND);
 $template->assign('dataUP', $dataUP);
 $template->assign('dataUN', $dataUN);
 $template->assign('dataDO', $dataDO);
+$template->assign('theme', $variablesThemeCSS);
+
 $template->display('hosts_status.ihtml');
